@@ -18,4 +18,4 @@ Also make sure you either have a VPN or you are disconnected from the schools ne
 3. chmod +x HAHSICS/setup.sh
 4. ./HAHSICS/setup.sh
 
-Whenever you wanna use the client run ./snipeit.sh
+Whenever you wanna use the client run ICS
