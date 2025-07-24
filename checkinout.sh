@@ -23,6 +23,10 @@ while true; do
   read INPUT
   [ "$INPUT" = "q" ] && exit 0
 
+  AUTH_HEADER="Authorization: Bearer $SNIPEIT_API_KEY"
+  ACCEPT_HEADER="Accept: application/json"
+  CONTENT_HEADER="Content-Type: application/json"
+
   # --- Asset tag resolve (supports s<search>) ---
   if echo "$INPUT" | grep -q "^s"; then
     QUERY="${INPUT#s}"
