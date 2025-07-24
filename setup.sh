@@ -10,12 +10,10 @@ read api_key
 # Save the key to a file
 echo "$api_key" > key.txt
 
-# Move the main scripts out
-mv HAHSICS/audit.sh audit.sh
+# Move the main script out
 mv HAHSICS/snipeit.sh snipeit.sh
 
 # Give run permissions
-chmod +x audit.sh
 chmod +x snipeit.sh
 
 # Remove junk
