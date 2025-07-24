@@ -16,5 +16,8 @@ mv HAHSICS/snipeit.sh snipeit.sh
 # Give run permissions
 chmod +x snipeit.sh
 
+clear
+
+echo "Successfully installed ICS client!"
 # Remove junk
 rm -rf HAHSICS
