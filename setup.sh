@@ -1,7 +1,11 @@
 #!/bin/sh
 
+# Install needed packages
 apk add curl jq
 
-touch key.txt
+# Prompt for API key
+echo -n "Enter your API key: "
+read api_key
 
-echo "eiojfosjf" > key.txt
+# Save the key to a file
+echo "$api_key" > key.txt
