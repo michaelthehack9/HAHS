@@ -178,8 +178,8 @@ while true; do
     CHECKOUT_URL="$SNIPEIT_BASE_URL/api/v1/hardware/$ASSET_ID/checkout"
     CHECKOUT_PAYLOAD=$(jq -n \
       --arg note "Checked out via script" \
-      --argjson uid "$USER_ID" \
-      '{checkout_to_type: "user", assigned_to: $uid, note: $note}')
+      --arg uid "$USER_ID" \
+      '{checkout_to_type: "user", assigned_to: ($uid | tonumber), note: $note}')
 
     CHECKOUT_RESPONSE=$(curl -s -X POST \
       -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" \
