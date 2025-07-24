@@ -8,16 +8,19 @@ echo -n "Enter your API key: "
 read api_key
 
 # Save the key to a file
-echo "$api_key" > key.txt
-
-# Move the main script out
-mv HAHSICS/snipeit.sh snipeit.sh
+echo "$api_key" > ICSkey.txt
 
 # Give run permissions
-chmod +x snipeit.sh
+chmod +x HAHSICS/ICS
+
+# Make script a command
+mv HAHSICS/ICS /usr/local/bin
+
+# Move key to command
+mv ICSkey.txt /usr/local/bin
 
 # Change startup text
-echo "Welcome to iSH! To open the client please type ./snipeit.sh" | sudo tee /etc/motd
+echo "Welcome to iSH! To open the client please type ICS" | sudo tee /etc/motd
 
 # Clear the console to make it look good
 clear
