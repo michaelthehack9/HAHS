@@ -1,5 +1,14 @@
 # How to download HAHS ICS client
 
+Please get your API key on your phone before continuing by following these steps.
+
+1. Goto ics.hasdhawks.org
+2. Login
+3. Click your profile and click manage API keys
+4. Click create new key
+5. Name it anything
+6. Then copy the API key
+
 # Apple
 
 Download ISH shell on the app store then type the following commands.
