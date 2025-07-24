@@ -1,0 +1,190 @@
+#!/bin/sh
+
+# ===== Configuration =====
+if [ -f key.txt ]; then
+  SNIPEIT_API_KEY=$(cat key.txt)
+else
+  echo "❌ Error: key.txt not found. Please create it with your API key."
+  exit 1
+fi
+
+if [ -z "$SNIPEIT_API_KEY" ]; then
+  echo "❌ Error: key.txt is empty. Please add your API key."
+  exit 1
+fi
+
+SNIPEIT_BASE_URL='http://ics.hasdhawks.org'
+AUTH_HEADER="Authorization: Bearer $SNIPEIT_API_KEY"
+ACCEPT_HEADER="Accept: application/json"
+CONTENT_HEADER="Content-Type: application/json"
+
+# ===== Functions =====
+get_asset_info() {
+  local INPUT="$1"
+  if echo "$INPUT" | grep -q "^s"; then
+    QUERY="${INPUT#s}"
+    echo "🔍 Searching for asset tags containing: '$QUERY'..."
+    SEARCH_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$QUERY&limit=100"
+    SEARCH_RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" "$SEARCH_URL")
+    TMP_MATCHES="/tmp/matches_assets.txt"
+    echo "$SEARCH_RESPONSE" \
+      | jq -r '.rows[] | select(.asset_tag and (.asset_tag | length == 8) and (.asset_tag | contains("'"$QUERY"'"))) | .asset_tag' \
+      > "$TMP_MATCHES"
+    MATCH_COUNT=$(wc -l < "$TMP_MATCHES")
+    if [ "$MATCH_COUNT" -eq 0 ]; then
+      echo "❌ No matching asset tags found."
+      return 1
+    elif [ "$MATCH_COUNT" -eq 1 ]; then
+      ASSET_TAG=$(head -n 1 "$TMP_MATCHES")
+    else
+      echo "Multiple matches found:"
+      i=1
+      while read -r tag; do
+        echo "$i) $tag"
+        i=$((i + 1))
+      done < "$TMP_MATCHES"
+      while true; do
+        echo -n "Select a number (1-$MATCH_COUNT): "
+        read CHOICE
+        if echo "$CHOICE" | grep -Eq '^[0-9]+$' && [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "$MATCH_COUNT" ]; then
+          ASSET_TAG=$(sed -n "${CHOICE}p" "$TMP_MATCHES")
+          break
+        else
+          echo "❌ Invalid selection."
+        fi
+      done
+    fi
+  else
+    ASSET_TAG="$INPUT"
+  fi
+
+  # Get full asset details
+  ASSET_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$ASSET_TAG&limit=100"
+  RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" "$ASSET_URL")
+  ASSET=$(echo "$RESPONSE" | jq -r --arg TAG "$ASSET_TAG" '.rows[] | select(.asset_tag == $TAG)')
+  if [ -z "$ASSET" ] || [ "$ASSET" = "null" ]; then
+    echo "❌ Asset tag '$ASSET_TAG' not found."
+    return 1
+  fi
+  ASSET_ID=$(echo "$ASSET" | jq '.id')
+  MODEL_NAME=$(echo "$ASSET" | jq -r '.model.name // "Unknown Model"')
+  CURRENT_USER=$(echo "$ASSET" | jq -r '.assigned_to.name // empty')
+  echo "📦 Asset: $ASSET_TAG ($MODEL_NAME)"
+  return 0
+}
+
+do_checkin() {
+  if [ -n "$CURRENT_USER" ]; then
+    echo "↩️  Checking in asset $ASSET_TAG..."
+    CHECKIN_URL="$SNIPEIT_BASE_URL/api/v1/hardware/$ASSET_ID/checkin"
+    CHECKIN_PAYLOAD=$(jq -n --arg note "Checked in via script" '{note: $note}')
+    CHECKIN_RESPONSE=$(curl -s -X POST \
+      -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" \
+      -d "$CHECKIN_PAYLOAD" "$CHECKIN_URL")
+    STATUS=$(echo "$CHECKIN_RESPONSE" | jq -r '.status // empty')
+    [ "$STATUS" = "success" ] && echo "✅ Successfully checked in." || echo "❌ Check-in failed: $CHECKIN_RESPONSE"
+  else
+    echo "ℹ️  Asset was not checked out. Skipping check-in."
+  fi
+}
+
+do_checkout() {
+  while true; do
+    echo -n "Enter LAST NAME to checkout to (blank to skip): "
+    read LNAME
+    [ -z "$LNAME" ] && { echo "Skipping checkout."; break; }
+    echo "🔍 Searching users by last name '$LNAME'..."
+    USERS_URL="$SNIPEIT_BASE_URL/api/v1/users?search=$LNAME&limit=100"
+    USERS_RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" "$USERS_URL")
+    TMP_USERS="/tmp/matches_users.txt"
+    echo "$USERS_RESPONSE" | jq -r '.rows[] | select(.last_name | test("'"$LNAME"'"; "i")) | "\(.id)|\(.name)"' > "$TMP_USERS"
+    USER_COUNT=$(wc -l < "$TMP_USERS")
+    if [ "$USER_COUNT" -eq 0 ]; then
+      echo "❌ No users found."
+      continue
+    elif [ "$USER_COUNT" -eq 1 ]; then
+      LINE=$(head -n 1 "$TMP_USERS")
+    else
+      echo "Multiple users found:"
+      i=1
+      while IFS='|' read -r id name; do
+        echo "$i) $name (ID: $id)"
+        i=$((i + 1))
+      done < "$TMP_USERS"
+      while true; do
+        echo -n "Select a number (1-$USER_COUNT): "
+        read CHOICE
+        if echo "$CHOICE" | grep -Eq '^[0-9]+$' && [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "$USER_COUNT" ]; then
+          LINE=$(sed -n "${CHOICE}p" "$TMP_USERS")
+          break
+        else
+          echo "❌ Invalid selection."
+        fi
+      done
+    fi
+    USER_ID=$(echo "$LINE" | cut -d'|' -f1)
+    USER_NAME=$(echo "$LINE" | cut -d'|' -f2-)
+    echo "📤 Checking out asset $ASSET_TAG to $USER_NAME..."
+    CHECKOUT_URL="$SNIPEIT_BASE_URL/api/v1/hardware/$ASSET_ID/checkout"
+    CHECKOUT_PAYLOAD=$(jq -n --arg note "Checked out via script" --arg uid "$USER_ID" \
+      '{checkout_to_type: "user", assigned_user: ($uid | tonumber), note: $note}')
+    CHECKOUT_RESPONSE=$(curl -s -X POST \
+      -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" \
+      -d "$CHECKOUT_PAYLOAD" "$CHECKOUT_URL")
+    STATUS=$(echo "$CHECKOUT_RESPONSE" | jq -r '.status // empty')
+    [ "$STATUS" = "success" ] && echo "✅ Checked out to $USER_NAME" || echo "❌ Checkout failed: $CHECKOUT_RESPONSE"
+    break
+  done
+}
+
+do_audit() {
+  echo "📋 Auditing asset $ASSET_TAG..."
+  AUDIT_URL="$SNIPEIT_BASE_URL/api/v1/hardware/audit"
+  AUDIT_PAYLOAD=$(jq -n --arg asset_tag "$ASSET_TAG" --arg note "Audited via script" '{asset_tag: $asset_tag, note: $note}')
+  AUDIT_RESPONSE=$(curl -s -X POST \
+    -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" \
+    -d "$AUDIT_PAYLOAD" "$AUDIT_URL")
+  STATUS=$(echo "$AUDIT_RESPONSE" | jq -r '.status // empty')
+  [ "$STATUS" = "success" ] && echo "✅ Audit recorded." || echo "❌ Audit failed: $AUDIT_RESPONSE"
+}
+
+show_assigned() {
+  if [ -n "$CURRENT_USER" ]; then
+    echo "🔗 Currently assigned to: $CURRENT_USER"
+  else
+    echo "🔗 Asset is not assigned to anyone."
+  fi
+}
+
+# ===== Main Menu =====
+echo "Choose actions (comma separated): audit, checkin, checkout, assigned"
+read -p "> " CHOICES
+CHOICES=$(echo "$CHOICES" | tr '[:upper:]' '[:lower:]')
+
+# Ask for asset tag
+echo -n "Enter Asset Tag (or 's<search>'): "
+read INPUT
+get_asset_info "$INPUT" || exit 1
+
+# ===== Build execution order =====
+RUN_ORDER=""
+case "$CHOICES" in
+  *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;;
+esac
+case "$CHOICES" in
+  *checkout*) RUN_ORDER="$RUN_ORDER checkin checkout" ;;
+  *checkin*)  RUN_ORDER="$RUN_ORDER checkin" ;;
+esac
+case "$CHOICES" in
+  *audit*)    RUN_ORDER="$RUN_ORDER audit" ;;
+esac
+
+# ===== Execute selected actions =====
+for action in $RUN_ORDER; do
+  case "$action" in
+    checkin)  do_checkin ;;
+    checkout) do_checkout ;;
+    assigned) show_assigned ;;
+    audit)    do_audit ;;
+  esac
+done
