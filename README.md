@@ -5,7 +5,7 @@ Please get your API key on your phone before continuing by following these steps
 1. Goto ics.hasdhawks.org
 2. Login
 3. Click your profile and click manage API keys
-4. Click create new key
+4. Click create new token
 5. Name it anything
 6. Then copy the API key
 
