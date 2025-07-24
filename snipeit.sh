@@ -19,7 +19,7 @@ SNIPEIT_BASE_URL='http://ics.hasdhawks.org'  # No trailing slash
 clear
 
 while true; do
-  echo -n "Enter Asset Tag: "
+  echo -n "Enter Asset Tag (or 's<search>'): "
   read INPUT
 
   AUTH_HEADER="Authorization: Bearer $SNIPEIT_API_KEY"
