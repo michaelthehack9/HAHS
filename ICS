@@ -160,31 +160,32 @@ show_assigned() {
 echo "Choose actions (comma separated): audit, checkin, checkout, assigned"
 read -p "> " CHOICES
 CHOICES=$(echo "$CHOICES" | tr '[:upper:]' '[:lower:]')
-
-# Ask for asset tag
-echo -n "Enter Asset Tag (or 's<search>'): "
-read INPUT
-get_asset_info "$INPUT" || exit 1
-
-# ===== Build execution order =====
-RUN_ORDER=""
-case "$CHOICES" in
-  *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;;
-esac
-case "$CHOICES" in
-  *checkout*) RUN_ORDER="$RUN_ORDER checkin checkout" ;;
-  *checkin*)  RUN_ORDER="$RUN_ORDER checkin" ;;
-esac
-case "$CHOICES" in
-  *audit*)    RUN_ORDER="$RUN_ORDER audit" ;;
-esac
-
-# ===== Execute selected actions =====
-for action in $RUN_ORDER; do
-  case "$action" in
-    checkin)  do_checkin ;;
-    checkout) do_checkout ;;
-    assigned) show_assigned ;;
-    audit)    do_audit ;;
+while true; do
+  # Ask for asset tag
+  echo -n "Enter Asset Tag (or 's<search>'): "
+  read INPUT
+  get_asset_info "$INPUT" || exit 1
+  
+  # ===== Build execution order =====
+  RUN_ORDER=""
+  case "$CHOICES" in
+    *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;;
   esac
+  case "$CHOICES" in
+    *checkout*) RUN_ORDER="$RUN_ORDER checkin checkout" ;;
+    *checkin*)  RUN_ORDER="$RUN_ORDER checkin" ;;
+  esac
+  case "$CHOICES" in
+    *audit*)    RUN_ORDER="$RUN_ORDER audit" ;;
+  esac
+  
+  # ===== Execute selected actions =====
+  for action in $RUN_ORDER; do
+    case "$action" in
+      checkin)  do_checkin ;;
+      checkout) do_checkout ;;
+      assigned) show_assigned ;;
+      audit)    do_audit ;;
+    esac
+  done
 done
