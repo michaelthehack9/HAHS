@@ -19,4 +19,5 @@ Also make sure you either have a VPN or you are disconnected from the schools ne
 4. ./HAHSICS/setup.sh
 
 # How to run the client
-Whenever you wanna use the client run ICS
+
+To rub the client type ICS
