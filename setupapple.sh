@@ -19,7 +19,7 @@ else
 fi
 
 # Give run permissions
-chmod +x HAHSICS/ICS
+chmod +x HAHSICS/ICSapple
 
 # Make script a command
 mv HAHSICS/ICSapple /usr/local/bin/ICS
