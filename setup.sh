@@ -3,8 +3,12 @@
 # Install needed packages
 apk add curl jq
 
-# If answer is not "y", ask for and save the key
-if [ "$need_api" != "y" ]; then
+# Ask if you would like to add an api key
+echo -n "Would you like to add a new API key? (y or n, default=n)"
+read need_api
+
+# If answer is "y", ask for and save the key
+if [ "$need_api" == "y" ]; then
   echo -n "Enter your API key: "
   read api_key
 
@@ -24,7 +28,7 @@ mv HAHSICS/ICS /usr/local/bin
 mv ICSkey.txt /usr/local/bin
 
 # Change startup text
-echo "Welcome to iSH! To open the client please type ICS" | sudo tee /etc/motd
+echo "Welcome to iSH! To open the client please type ICS\n" | tee /etc/motd
 
 # Clear the console to make it look good
 clear
