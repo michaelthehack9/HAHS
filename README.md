@@ -9,7 +9,7 @@ Please get your API key on your phone before continuing by following these steps
 5. Name it anything
 6. Then copy the API key
 
-# Apple
+## Apple
 
 Download ISH shell on the app store then type the following commands.
 Also make sure you either have a VPN or you are disconnected from the schools network.
@@ -18,4 +18,5 @@ Also make sure you either have a VPN or you are disconnected from the schools ne
 3. chmod +x HAHSICS/setup.sh
 4. ./HAHSICS/setup.sh
 
+# How to run the client
 Whenever you wanna use the client run ICS
