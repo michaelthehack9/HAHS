@@ -168,11 +168,8 @@ while true; do
   read INPUT
   get_asset_info "$INPUT"
   if [ $? -ne 0 ]; then
-    echo "❌ Asset not found. Try again."
     continue
   fi
-
-
   RUN_ORDER=""
   case "$CHOICES" in
     *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;;
