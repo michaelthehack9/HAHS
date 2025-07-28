@@ -166,7 +166,12 @@ CHOICES=$(echo "$CHOICES" | tr '[:upper:]' '[:lower:]')
 while true; do
   echo -n "Enter Asset Tag (or 's<search>'): "
   read INPUT
-  get_asset_info "$INPUT" || exit 1
+  get_asset_info "$INPUT"
+  if [ $? -ne 0 ]; then
+    echo "❌ Asset not found. Try again."
+    continue
+  fi
+
 
   RUN_ORDER=""
   case "$CHOICES" in
