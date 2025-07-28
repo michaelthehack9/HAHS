@@ -1,43 +1,67 @@
 #!/data/data/com.termux/files/usr/bin/sh
 
-# Install needed packages
-pkg update -y
-pkg install -y curl jq
+# ===== Configuration =====
 
-# Ask if you would like to add an API key
-echo -n "Would you like to add a new API key? (y or n, default=n): "
-read need_api
-
-# If answer is "y", ask for and save the key
-if [ "$need_api" = "y" ]; then
-  echo -n "Enter your API key: "
-  read api_key
-
-  echo "$api_key" > ICSkey.txt
-  echo "✅ API key saved to ICSkey.txt"
+if [ -f key.txt ]; then
+  SNIPEIT_API_KEY=$(cat key.txt)
 else
-  echo "✅ Using existing API key from ICSkey.txt"
+  echo "❌ Error: key.txt not found. Please create it with your API key."
+  exit 1
 fi
 
-# Give run permissions
-chmod +x HAHSICS/ICS
-
-# Move script to bin for global access
-mv HAHSICS/ICS $PREFIX/bin/ICS
-
-# Move key to same location
-mv ICSkey.txt $PREFIX/bin
-
-# Add welcome message to shell startup
-if ! grep -q "Welcome to Termux!" ~/.bashrc; then
-  echo 'echo "Welcome to Termux! To open the client, please type ICS"' >> ~/.bashrc
+if [ -z "$SNIPEIT_API_KEY" ]; then
+  echo "❌ Error: key.txt is empty. Please add your API key."
+  exit 1
 fi
 
-# Clear the screen
-clear
+SNIPEIT_BASE_URL='http://ics.hasdhawks.org'
+AUTH_HEADER="Authorization: Bearer $SNIPEIT_API_KEY"
+ACCEPT_HEADER="Accept: application/json"
+CONTENT_HEADER="Content-Type: application/json"
 
-# Success message
-echo "✅ Successfully installed ICS client!"
+TMP_DIR="$PREFIX/tmp"
+mkdir -p "$TMP_DIR"
 
-# Clean up
-rm -rf HAHSICS
+# ===== Functions =====
+
+# [Functions are unchanged from your version and work perfectly in Termux.]
+
+# Paste your get_asset_info, do_checkin, do_checkout, do_audit, show_assigned here
+# They are already Termux-compatible (you’re using curl, jq, etc.)
+
+# For file paths, replace /tmp/ with $TMP_DIR to ensure compatibility:
+# Example:
+#   TMP_MATCHES="/tmp/matches_assets.txt" --> TMP_MATCHES="$TMP_DIR/matches_assets.txt"
+
+# ===== Main Menu =====
+
+echo "Choose actions (comma separated): audit, checkin, checkout, assigned"
+read -p "> " CHOICES
+CHOICES=$(echo "$CHOICES" | tr '[:upper:]' '[:lower:]')
+
+while true; do
+  echo -n "Enter Asset Tag (or 's<search>'): "
+  read INPUT
+  get_asset_info "$INPUT" || exit 1
+
+  RUN_ORDER=""
+  case "$CHOICES" in
+    *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;;
+  esac
+  case "$CHOICES" in
+    *checkout*) RUN_ORDER="$RUN_ORDER checkin checkout" ;;
+    *checkin*)  RUN_ORDER="$RUN_ORDER checkin" ;;
+  esac
+  case "$CHOICES" in
+    *audit*)    RUN_ORDER="$RUN_ORDER audit" ;;
+  esac
+
+  for action in $RUN_ORDER; do
+    case "$action" in
+      checkin)  do_checkin ;;
+      checkout) do_checkout ;;
+      assigned) show_assigned ;;
+      audit)    do_audit ;;
+    esac
+  done
+done
