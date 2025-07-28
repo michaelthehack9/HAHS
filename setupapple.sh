@@ -4,7 +4,7 @@
 apk add curl jq
 
 # Ask if you would like to add an api key
-echo -n "Would you like to add a new API key? (y or n, default=n)"
+echo -n "Would you like to add a new API key? (y or n, default=n): "
 read need_api
 
 # If answer is "y", ask for and save the key
