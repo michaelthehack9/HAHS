@@ -164,8 +164,10 @@ while true; do
   # Ask for asset tag
   echo -n "Enter Asset Tag (or 's<search>'): "
   read INPUT
-  get_asset_info "$INPUT" || exit 1
-  
+  get_asset_info "$INPUT"
+  if [ $? -ne 0 ]; then
+    continue
+  fi
   # ===== Build execution order =====
   RUN_ORDER=""
   case "$CHOICES" in
