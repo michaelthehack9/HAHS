@@ -4,6 +4,9 @@
 pkg update -y
 pkg install -y curl jq
 
+# Make directory for key
+mkdir -p ~/.ics
+
 # Ask if you would like to add an API key
 echo -n "Would you like to add a new API key? (y or n, default=n): "
 read need_api
@@ -13,7 +16,7 @@ if [ "$need_api" = "y" ]; then
   echo -n "Enter your API key: "
   read api_key
 
-  echo "$api_key" > ICSkey.txt
+  echo "$api_key" > ~/.ics/ICSkey.txt
   echo "✅ API key saved to ICSkey.txt"
 else
   echo "✅ Using existing API key from ICSkey.txt"
@@ -24,9 +27,6 @@ chmod +x HAHSICS/ICSandroid
 
 # Move script to bin for global access
 mv HAHSICS/ICSandroid $PREFIX/bin/ICS
-
-# Move key to same location
-mv ICSkey.txt $PREFIX/bin
 
 # Add welcome message to shell startup
 if ! grep -q "Welcome to Termux!" ~/.bashrc; then
