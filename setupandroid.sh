@@ -2,7 +2,7 @@
 
 # Install needed packages
 pkg update -y
-pkg install -y curl jq
+pkg install -y jq
 
 # Make directory for key
 mkdir -p ~/.ics
