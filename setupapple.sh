@@ -22,7 +22,7 @@ fi
 chmod +x HAHSICS/ICS
 
 # Make script a command
-mv HAHSICS/ICS /usr/local/bin
+mv HAHSICS/ICSapple /usr/local/bin/ICS
 
 # Move key to command
 mv ICSkey.txt /usr/local/bin
