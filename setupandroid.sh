@@ -23,7 +23,7 @@ fi
 chmod +x HAHSICS/ICS
 
 # Move script to bin for global access
-mv HAHSICS/ICS $PREFIX/bin/ICS
+mv HAHSICS/ICSandroid $PREFIX/bin/ICS
 
 # Move key to same location
 mv ICSkey.txt $PREFIX/bin
