@@ -20,7 +20,7 @@ else
 fi
 
 # Give run permissions
-chmod +x HAHSICS/ICS
+chmod +x HAHSICS/ICSandroid
 
 # Move script to bin for global access
 mv HAHSICS/ICSandroid $PREFIX/bin/ICS
