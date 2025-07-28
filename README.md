@@ -20,4 +20,4 @@ Also make sure you either have a VPN or you are disconnected from the schools ne
 
 # How to run the client
 
-To rub the client type ICS
+To run the client type ICS
