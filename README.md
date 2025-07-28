@@ -24,11 +24,11 @@ Also make sure you either have a VPN or you are disconnected from the schools ne
 Download Termux on the play store theb type the following commands.
 Also make sure you either have a VPN or you are disconnected from the schools network.
 
-1. pkg install got
+1. pkg install git
 2. git clone https://github.com/michaelthehack9/HAHSICS.git
 3. chmod +x HAHSICS/setupandroid.sh
 4. ./HAHSICS/setupandroid.sh
-5. 
+
 # How to run the client
 
 To run the client type ICS
