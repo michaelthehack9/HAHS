@@ -28,7 +28,7 @@ get_asset_info() {
     SEARCH_RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" "$SEARCH_URL")
     TMP_MATCHES="/tmp/matches_assets.txt"
     echo "$SEARCH_RESPONSE" \
-      | jq -r '.rows[] | select(.asset_tag and (.asset_tag | length == 8) and (.asset_tag | contains("'"$QUERY"'"))) | .asset_tag' \
+      | jq -r --arg query "$QUERY" '.rows[] | select(.asset_tag and (.asset_tag | length >= 6 and .asset_tag | length <= 10) and (.asset_tag | test($query))) | .asset_tag' \
       > "$TMP_MATCHES"
     MATCH_COUNT=$(wc -l < "$TMP_MATCHES")
     if [ "$MATCH_COUNT" -eq 0 ]; then
@@ -180,7 +180,7 @@ while true; do
   case "$CHOICES" in
     *audit*)    RUN_ORDER="$RUN_ORDER audit" ;;
   esac
-  
+
   # ===== Execute selected actions =====
   for action in $RUN_ORDER; do
     case "$action" in
