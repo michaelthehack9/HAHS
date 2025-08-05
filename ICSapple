@@ -18,21 +18,96 @@ AUTH_HEADER="Authorization: Bearer $SNIPEIT_API_KEY"
 ACCEPT_HEADER="Accept: application/json"
 CONTENT_HEADER="Content-Type: application/json"
 
+CACHE_FILE="/tmp/snipeit_assets_cache.json"
+
+MODE="regular"
+
 # ===== Functions =====
+
+download_all_assets() {
+  echo "⏳ Downloading all assets from Snipe-IT (this may take a while)..."
+  PAGE_SIZE=500
+  OFFSET=0
+  MAX_ITER=30
+  > "$CACHE_FILE"
+  echo "[" > "$CACHE_FILE"
+
+  FIRST=1
+  while [ $MAX_ITER -gt 0 ]; do
+    echo "Fetching assets offset $OFFSET ..."
+    RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" \
+      "$SNIPEIT_BASE_URL/api/v1/hardware?limit=$PAGE_SIZE&offset=$OFFSET")
+
+    COUNT=$(echo "$RESPONSE" | jq '.rows | length // 0')
+    echo "Assets this batch: $COUNT"
+
+    if [ "$COUNT" -eq 0 ]; then
+      echo "No more assets, stopping."
+      break
+    fi
+
+    # Filter only assets with asset_tag length 8 or 9
+    PAGE_ITEMS=$(echo "$RESPONSE" | jq '.rows | map(select(.asset_tag and ((.asset_tag | length == 8) or (.asset_tag | length == 9)))) | .[]')
+
+    # Skip if no valid assets in this page
+    [ -z "$PAGE_ITEMS" ] && {
+      OFFSET=$((OFFSET + PAGE_SIZE))
+      MAX_ITER=$((MAX_ITER - 1))
+      continue
+    }
+
+    if [ $FIRST -eq 1 ]; then
+      FIRST=0
+      echo "$PAGE_ITEMS" | jq -c '.' | paste -sd "," - >> "$CACHE_FILE"
+    else
+      echo "," >> "$CACHE_FILE"
+      echo "$PAGE_ITEMS" | jq -c '.' | paste -sd "," - >> "$CACHE_FILE"
+    fi
+
+    OFFSET=$((OFFSET + PAGE_SIZE))
+    MAX_ITER=$((MAX_ITER - 1))
+  done
+
+  echo "]" >> "$CACHE_FILE"
+  echo "✅ Finished downloading and filtering assets (8 or 9 character tags only)."
+}
+
+
+load_asset_by_tag() {
+  local tag="$1"
+  ASSET=$(jq -r --arg tag "$tag" '.[] | select(.asset_tag == $tag)' "$CACHE_FILE")
+  if [ -z "$ASSET" ]; then
+    return 1
+  fi
+  echo "$ASSET"
+  return 0
+}
+
+search_assets_by_serial() {
+  local query="$1"
+  jq -r --arg q "$query" '
+    .[]
+    | select(
+        .asset_tag and
+        (.asset_tag | type == "string") and
+        ((.asset_tag | length == 8) or (.asset_tag | length == 9)) and
+        (.asset_tag | ascii_downcase | endswith($q | ascii_downcase))
+      )
+    | .asset_tag' "$CACHE_FILE"
+}
+
 get_asset_info() {
   local INPUT="$1"
-  if echo "$INPUT" | grep -q "^s"; then
-    QUERY="${INPUT#s}"
-    echo "🔍 Searching for asset tags containing: '$QUERY'..."
-    SEARCH_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$QUERY&limit=100"
-    SEARCH_RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" "$SEARCH_URL")
+
+  if [ "$MODE" = "serial" ]; then
+    QUERY="$INPUT"
+    echo "🔍 Searching cached assets for tags ending with '$QUERY'..."
     TMP_MATCHES="/tmp/matches_assets.txt"
-    echo "$SEARCH_RESPONSE" \
-      | jq -r '.rows[] | select(.asset_tag and (.asset_tag | length == 8) and (.asset_tag | contains("'"$QUERY"'"))) | .asset_tag' \
-      > "$TMP_MATCHES"
+    > "$TMP_MATCHES"
+    search_assets_by_serial "$QUERY" >> "$TMP_MATCHES"
     MATCH_COUNT=$(wc -l < "$TMP_MATCHES")
     if [ "$MATCH_COUNT" -eq 0 ]; then
-      echo "❌ No matching asset tags found."
+      echo "❌ No matching asset tags found in cache."
       return 1
     elif [ "$MATCH_COUNT" -eq 1 ]; then
       ASSET_TAG=$(head -n 1 "$TMP_MATCHES")
@@ -58,17 +133,25 @@ get_asset_info() {
     ASSET_TAG="$INPUT"
   fi
 
-  # Get full asset details
-  ASSET_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$ASSET_TAG&limit=100"
-  RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" "$ASSET_URL")
-  ASSET=$(echo "$RESPONSE" | jq -r --arg TAG "$ASSET_TAG" '.rows[] | select(.asset_tag == $TAG)')
-  if [ -z "$ASSET" ] || [ "$ASSET" = "null" ]; then
-    echo "❌ Asset tag '$ASSET_TAG' not found."
-    return 1
+  if [ "$MODE" = "serial" ]; then
+    ASSET_JSON=$(load_asset_by_tag "$ASSET_TAG")
+    if [ $? -ne 0 ] || [ -z "$ASSET_JSON" ]; then
+      echo "❌ Asset tag '$ASSET_TAG' not found in cache."
+      return 1
+    fi
+  else
+    ASSET_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$ASSET_TAG&limit=100"
+    RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" "$ASSET_URL")
+    ASSET_JSON=$(echo "$RESPONSE" | jq -r --arg TAG "$ASSET_TAG" '.rows[] | select(.asset_tag == $TAG)')
+    if [ -z "$ASSET_JSON" ] || [ "$ASSET_JSON" = "null" ]; then
+      echo "❌ Asset tag '$ASSET_TAG' not found."
+      return 1
+    fi
   fi
-  ASSET_ID=$(echo "$ASSET" | jq '.id')
-  MODEL_NAME=$(echo "$ASSET" | jq -r '.model.name // "Unknown Model"')
-  CURRENT_USER=$(echo "$ASSET" | jq -r '.assigned_to.name // empty')
+
+  ASSET_ID=$(echo "$ASSET_JSON" | jq '.id')
+  MODEL_NAME=$(echo "$ASSET_JSON" | jq -r '.model.name // "Unknown Model"')
+  CURRENT_USER=$(echo "$ASSET_JSON" | jq -r '.assigned_to.name // empty')
   echo "📦 Asset: $ASSET_TAG ($MODEL_NAME)"
   return 0
 }
@@ -156,32 +239,44 @@ show_assigned() {
   fi
 }
 
-# ===== Main Menu =====
+# ===== Start Script =====
+
+echo "Select mode:"
+echo "1) regular (search by full asset tag, no caching)"
+echo "2) serial  (loads all assets once and searches cached data by last characters)"
+echo -n "Enter mode number (1 or 2): "
+read MODE_CHOICE
+case "$MODE_CHOICE" in
+  2) MODE="serial" ;;
+  *) MODE="regular" ;;
+esac
+
+if [ "$MODE" = "serial" ]; then
+  download_all_assets
+fi
+
 echo "Choose actions (comma separated): audit, checkin, checkout, assigned"
 read -p "> " CHOICES
 CHOICES=$(echo "$CHOICES" | tr '[:upper:]' '[:lower:]')
+
 while true; do
-  # Ask for asset tag
-  echo -n "Enter Asset Tag (or 's<search>'): "
+  if [ "$MODE" = "serial" ]; then
+    echo -n "Enter LAST characters of Asset Tag to search (e.g. 'FYN9'): "
+  else
+    echo -n "Enter FULL Asset Tag: "
+  fi
   read INPUT
   get_asset_info "$INPUT"
   if [ $? -ne 0 ]; then
     continue
   fi
-  # ===== Build execution order =====
+
   RUN_ORDER=""
-  case "$CHOICES" in
-    *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;;
-  esac
-  case "$CHOICES" in
-    *checkout*) RUN_ORDER="$RUN_ORDER checkin checkout" ;;
-    *checkin*)  RUN_ORDER="$RUN_ORDER checkin" ;;
-  esac
-  case "$CHOICES" in
-    *audit*)    RUN_ORDER="$RUN_ORDER audit" ;;
-  esac
-  
-  # ===== Execute selected actions =====
+  case "$CHOICES" in *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;; esac
+  case "$CHOICES" in *checkout*) RUN_ORDER="$RUN_ORDER checkin checkout" ;; esac
+  case "$CHOICES" in *checkin*)  RUN_ORDER="$RUN_ORDER checkin" ;; esac
+  case "$CHOICES" in *audit*)    RUN_ORDER="$RUN_ORDER audit" ;; esac
+
   for action in $RUN_ORDER; do
     case "$action" in
       checkin)  do_checkin ;;
