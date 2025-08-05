@@ -2,73 +2,119 @@
 
 # ===== Configuration =====
 KEY_FILE="$HOME/.ics/ICSkey.txt"
+CACHE_FILE="$PREFIX/tmp/snipeit_assets_cache.json"
+TMP_MATCHES="$PREFIX/tmp/matches_assets.txt"
+TMP_USERS="$PREFIX/tmp/matches_users.txt"
+
+if [ ! -f "$KEY_FILE" ]; then
+  echo "❌ Error: $KEY_FILE not found. Please create it with your API key."
+  exit 1
+fi
+
+SNIPEIT_API_KEY=$(cat "$KEY_FILE")
+if [ -z "$SNIPEIT_API_KEY" ]; then
+  echo "❌ Error: API key file is empty."
+  exit 1
+fi
+
 SNIPEIT_BASE_URL='http://ics.hasdhawks.org'
-AUTH_HEADER="Authorization: Bearer $(cat "$KEY_FILE" 2>/dev/null)"
+AUTH_HEADER="Authorization: Bearer $SNIPEIT_API_KEY"
 ACCEPT_HEADER="Accept: application/json"
 CONTENT_HEADER="Content-Type: application/json"
-TMP_DIR=$(mktemp -d)
 
-# ===== Colors =====
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# ===== Check API Key =====
-if [ ! -f "$KEY_FILE" ]; then
-  echo -e "${RED}❌ Error: $KEY_FILE not found. Please create it with your API key.${NC}"
-  exit 1
-fi
-
-if [ -z "$AUTH_HEADER" ]; then
-  echo -e "${RED}❌ Error: API key is empty. Please check $KEY_FILE.${NC}"
-  exit 1
-fi
-
-# ===== Cleanup on Exit =====
-cleanup() {
-  rm -rf "$TMP_DIR"
-}
-trap cleanup EXIT
+MODE="regular"
 
 # ===== Functions =====
 
+download_all_assets() {
+  echo "⏳ Downloading all assets from Snipe-IT..."
+  PAGE_SIZE=500
+  OFFSET=0
+  MAX_ITER=30
+  > "$CACHE_FILE"
+  echo "[" > "$CACHE_FILE"
+
+  FIRST=1
+  while [ $MAX_ITER -gt 0 ]; do
+    echo "Fetching assets offset $OFFSET ..."
+    RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" \
+      "$SNIPEIT_BASE_URL/api/v1/hardware?limit=$PAGE_SIZE&offset=$OFFSET")
+
+    COUNT=$(echo "$RESPONSE" | jq '.rows | length // 0')
+    echo "Assets this batch: $COUNT"
+
+    [ "$COUNT" -eq 0 ] && break
+
+    PAGE_ITEMS=$(echo "$RESPONSE" | jq '.rows | map(select(.asset_tag and ((.asset_tag | length == 8) or (.asset_tag | length == 9)))) | .[]')
+
+    [ -z "$PAGE_ITEMS" ] && {
+      OFFSET=$((OFFSET + PAGE_SIZE))
+      MAX_ITER=$((MAX_ITER - 1))
+      continue
+    }
+
+    if [ $FIRST -eq 1 ]; then
+      FIRST=0
+      echo "$PAGE_ITEMS" | jq -c '.' | paste -sd "," - >> "$CACHE_FILE"
+    else
+      echo "," >> "$CACHE_FILE"
+      echo "$PAGE_ITEMS" | jq -c '.' | paste -sd "," - >> "$CACHE_FILE"
+    fi
+
+    OFFSET=$((OFFSET + PAGE_SIZE))
+    MAX_ITER=$((MAX_ITER - 1))
+  done
+
+  echo "]" >> "$CACHE_FILE"
+  echo "✅ Finished downloading and filtering assets (8/9-character tags only)."
+}
+
+load_asset_by_tag() {
+  local tag="$1"
+  ASSET=$(jq -r --arg tag "$tag" '.[] | select(.asset_tag == $tag)' "$CACHE_FILE")
+  [ -z "$ASSET" ] && return 1
+  echo "$ASSET"
+  return 0
+}
+
+search_assets_by_serial() {
+  local query="$1"
+  jq -r --arg q "$query" '
+    .[]
+    | select(
+        .asset_tag and
+        (.asset_tag | type == "string") and
+        ((.asset_tag | length == 8) or (.asset_tag | length == 9)) and
+        (.asset_tag | ascii_downcase | endswith($q | ascii_downcase))
+      )
+    | .asset_tag' "$CACHE_FILE"
+}
+
 get_asset_info() {
   local INPUT="$1"
-  if echo "$INPUT" | grep -q "^s"; then
-    QUERY="${INPUT#s}"
-    echo -e "${YELLOW}🔍 Searching for asset tags containing: '$QUERY'...${NC}"
-    SEARCH_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$QUERY&limit=100"
-    SEARCH_RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" "$SEARCH_URL")
-    echo "$SEARCH_RESPONSE" > "$TMP_DIR/last_response.json"
 
-    MATCH_FILE="$TMP_DIR/matches_assets.txt"
-    echo "$SEARCH_RESPONSE" \
-      | jq -r '.rows[] 
-        | select(.asset_tag and ((.asset_tag | length == 8) or (.asset_tag | length == 9)) and (.asset_tag | contains("'"$QUERY"'"))) 
-        | .asset_tag' > "$MATCH_FILE"
-
-    MATCH_COUNT=$(wc -l < "$MATCH_FILE")
+  if [ "$MODE" = "serial" ]; then
+    QUERY="$INPUT"
+    echo "🔍 Searching cached assets for tags ending with '$QUERY'..."
+    > "$TMP_MATCHES"
+    search_assets_by_serial "$QUERY" >> "$TMP_MATCHES"
+    MATCH_COUNT=$(wc -l < "$TMP_MATCHES")
     if [ "$MATCH_COUNT" -eq 0 ]; then
-      echo -e "${RED}❌ No matching asset tags found.${NC}"
+      echo "❌ No matching asset tags found in cache."
       return 1
     elif [ "$MATCH_COUNT" -eq 1 ]; then
-      ASSET_TAG=$(head -n 1 "$MATCH_FILE")
+      ASSET_TAG=$(head -n 1 "$TMP_MATCHES")
     else
       echo "Multiple matches found:"
-      i=1
-      while read -r tag; do
-        echo "$i) $tag"
-        i=$((i + 1))
-      done < "$MATCH_FILE"
+      nl -w2 -s') ' "$TMP_MATCHES"
       while true; do
         echo -n "Select a number (1-$MATCH_COUNT): "
         read CHOICE
         if echo "$CHOICE" | grep -Eq '^[0-9]+$' && [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "$MATCH_COUNT" ]; then
-          ASSET_TAG=$(sed -n "${CHOICE}p" "$MATCH_FILE")
+          ASSET_TAG=$(sed -n "${CHOICE}p" "$TMP_MATCHES")
           break
         else
-          echo -e "${RED}❌ Invalid selection.${NC}"
+          echo "❌ Invalid selection."
         fi
       done
     fi
@@ -76,29 +122,26 @@ get_asset_info() {
     ASSET_TAG="$INPUT"
   fi
 
-  if ! echo "$ASSET_TAG" | grep -Eq '^[A-Za-z0-9]{8,9}$'; then
-    echo -e "${YELLOW}⚠️ Warning: Asset tag should be 8 or 9 characters long.${NC}"
+  if [ "$MODE" = "serial" ]; then
+    ASSET_JSON=$(load_asset_by_tag "$ASSET_TAG")
+    [ $? -ne 0 ] || [ -z "$ASSET_JSON" ] && {
+      echo "❌ Asset tag '$ASSET_TAG' not found in cache."
+      return 1
+    }
+  else
+    ASSET_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$ASSET_TAG&limit=100"
+    RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" "$ASSET_URL")
+    ASSET_JSON=$(echo "$RESPONSE" | jq -r --arg TAG "$ASSET_TAG" '.rows[] | select(.asset_tag == $TAG)')
+    [ -z "$ASSET_JSON" ] || [ "$ASSET_JSON" = "null" ] && {
+      echo "❌ Asset tag '$ASSET_TAG' not found."
+      return 1
+    }
   fi
 
-  # Get full asset details
-  ASSET_URL="$SNIPEIT_BASE_URL/api/v1/hardware?search=$ASSET_TAG&limit=100"
-  RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" "$ASSET_URL")
-  echo "$RESPONSE" > "$TMP_DIR/last_response.json"
-
-  ASSET=$(echo "$RESPONSE" | jq -r --arg TAG "$ASSET_TAG" '.rows[] | select(.asset_tag == $TAG)')
-  if [ -z "$ASSET" ] || [ "$ASSET" = "null" ]; then
-    echo -e "${RED}❌ Asset tag '$ASSET_TAG' not found.${NC}"
-    return 1
-  fi
-
-  ASSET_ID=$(echo "$ASSET" | jq '.id')
-  MODEL_NAME=$(echo "$ASSET" | jq -r '.model.name // "Unknown Model"')
-  CURRENT_USER=$(echo "$ASSET" | jq -r '.assigned_to.name // empty')
-  LOCATION=$(echo "$ASSET" | jq -r '.location.name // "Unknown Location"')
-
-  echo -e "${GREEN}📦 Asset: $ASSET_TAG${NC}"
-  echo -e "${YELLOW}📌 Model: $MODEL_NAME${NC}"
-  echo -e "${YELLOW}📍 Location: $LOCATION${NC}"
+  ASSET_ID=$(echo "$ASSET_JSON" | jq '.id')
+  MODEL_NAME=$(echo "$ASSET_JSON" | jq -r '.model.name // "Unknown Model"')
+  CURRENT_USER=$(echo "$ASSET_JSON" | jq -r '.assigned_to.name // empty')
+  echo "📦 Asset: $ASSET_TAG ($MODEL_NAME)"
   return 0
 }
 
@@ -106,14 +149,14 @@ do_checkin() {
   if [ -n "$CURRENT_USER" ]; then
     echo "↩️  Checking in asset $ASSET_TAG..."
     CHECKIN_URL="$SNIPEIT_BASE_URL/api/v1/hardware/$ASSET_ID/checkin"
-    CHECKIN_PAYLOAD=$(jq -n --arg note "Checked in via Termux script" '{note: $note}')
+    CHECKIN_PAYLOAD=$(jq -n --arg note "Checked in via script" '{note: $note}')
     CHECKIN_RESPONSE=$(curl -s -X POST \
       -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" \
       -d "$CHECKIN_PAYLOAD" "$CHECKIN_URL")
     STATUS=$(echo "$CHECKIN_RESPONSE" | jq -r '.status // empty')
-    [ "$STATUS" = "success" ] && echo -e "${GREEN}✅ Successfully checked in.${NC}" || echo -e "${RED}❌ Check-in failed: $CHECKIN_RESPONSE${NC}"
+    [ "$STATUS" = "success" ] && echo "✅ Successfully checked in." || echo "❌ Check-in failed: $CHECKIN_RESPONSE"
   else
-    echo -e "${YELLOW}ℹ️  Asset was not checked out. Skipping check-in.${NC}"
+    echo "ℹ️  Asset was not checked out. Skipping check-in."
   fi
 }
 
@@ -125,29 +168,24 @@ do_checkout() {
     echo "🔍 Searching users by last name '$LNAME'..."
     USERS_URL="$SNIPEIT_BASE_URL/api/v1/users?search=$LNAME&limit=100"
     USERS_RESPONSE=$(curl -s -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" "$USERS_URL")
-    MATCH_FILE="$TMP_DIR/matches_users.txt"
-    echo "$USERS_RESPONSE" | jq -r '.rows[] | select(.last_name | test("'"$LNAME"'"; "i")) | "\(.id)|\(.name)"' > "$MATCH_FILE"
-    USER_COUNT=$(wc -l < "$MATCH_FILE")
+    echo "$USERS_RESPONSE" | jq -r '.rows[] | select(.last_name | test("'"$LNAME"'"; "i")) | "\(.id)|\(.name)"' > "$TMP_USERS"
+    USER_COUNT=$(wc -l < "$TMP_USERS")
     if [ "$USER_COUNT" -eq 0 ]; then
-      echo -e "${RED}❌ No users found.${NC}"
+      echo "❌ No users found."
       continue
     elif [ "$USER_COUNT" -eq 1 ]; then
-      LINE=$(head -n 1 "$MATCH_FILE")
+      LINE=$(head -n 1 "$TMP_USERS")
     else
       echo "Multiple users found:"
-      i=1
-      while IFS='|' read -r id name; do
-        echo "$i) $name (ID: $id)"
-        i=$((i + 1))
-      done < "$MATCH_FILE"
+      nl -w2 -s') ' "$TMP_USERS" | cut -d'|' -f2-
       while true; do
         echo -n "Select a number (1-$USER_COUNT): "
         read CHOICE
         if echo "$CHOICE" | grep -Eq '^[0-9]+$' && [ "$CHOICE" -ge 1 ] && [ "$CHOICE" -le "$USER_COUNT" ]; then
-          LINE=$(sed -n "${CHOICE}p" "$MATCH_FILE")
+          LINE=$(sed -n "${CHOICE}p" "$TMP_USERS")
           break
         else
-          echo -e "${RED}❌ Invalid selection.${NC}"
+          echo "❌ Invalid selection."
         fi
       done
     fi
@@ -155,13 +193,13 @@ do_checkout() {
     USER_NAME=$(echo "$LINE" | cut -d'|' -f2-)
     echo "📤 Checking out asset $ASSET_TAG to $USER_NAME..."
     CHECKOUT_URL="$SNIPEIT_BASE_URL/api/v1/hardware/$ASSET_ID/checkout"
-    CHECKOUT_PAYLOAD=$(jq -n --arg note "Checked out via Termux script" --arg uid "$USER_ID" \
+    CHECKOUT_PAYLOAD=$(jq -n --arg note "Checked out via script" --arg uid "$USER_ID" \
       '{checkout_to_type: "user", assigned_user: ($uid | tonumber), note: $note}')
     CHECKOUT_RESPONSE=$(curl -s -X POST \
       -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" \
       -d "$CHECKOUT_PAYLOAD" "$CHECKOUT_URL")
     STATUS=$(echo "$CHECKOUT_RESPONSE" | jq -r '.status // empty')
-    [ "$STATUS" = "success" ] && echo -e "${GREEN}✅ Checked out to $USER_NAME${NC}" || echo -e "${RED}❌ Checkout failed: $CHECKOUT_RESPONSE${NC}"
+    [ "$STATUS" = "success" ] && echo "✅ Checked out to $USER_NAME" || echo "❌ Checkout failed: $CHECKOUT_RESPONSE"
     break
   done
 }
@@ -169,35 +207,36 @@ do_checkout() {
 do_audit() {
   echo "📋 Auditing asset $ASSET_TAG..."
   AUDIT_URL="$SNIPEIT_BASE_URL/api/v1/hardware/audit"
-  AUDIT_PAYLOAD=$(jq -n --arg asset_tag "$ASSET_TAG" --arg note "Audited via Termux script" '{asset_tag: $asset_tag, note: $note}')
+  AUDIT_PAYLOAD=$(jq -n --arg asset_tag "$ASSET_TAG" --arg note "Audited via script" '{asset_tag: $asset_tag, note: $note}')
   AUDIT_RESPONSE=$(curl -s -X POST \
     -H "$AUTH_HEADER" -H "$ACCEPT_HEADER" -H "$CONTENT_HEADER" \
     -d "$AUDIT_PAYLOAD" "$AUDIT_URL")
   STATUS=$(echo "$AUDIT_RESPONSE" | jq -r '.status // empty')
-  [ "$STATUS" = "success" ] && echo -e "${GREEN}✅ Audit recorded.${NC}" || echo -e "${RED}❌ Audit failed: $AUDIT_RESPONSE${NC}"
+  [ "$STATUS" = "success" ] && echo "✅ Audit recorded." || echo "❌ Audit failed: $AUDIT_RESPONSE"
 }
 
 show_assigned() {
-  if [ -n "$CURRENT_USER" ]; then
-    echo -e "${GREEN}🔗 Currently assigned to: $CURRENT_USER${NC}"
-  else
-    echo -e "${YELLOW}🔗 Asset is not assigned to anyone.${NC}"
-  fi
+  [ -n "$CURRENT_USER" ] && echo "🔗 Currently assigned to: $CURRENT_USER" || echo "🔗 Asset is not assigned to anyone."
 }
 
-# ===== Menu =====
+# ===== Start Script =====
 
-echo "Choose actions (comma separated): audit, checkin, checkout, assigned"
-read -p "> " CHOICES
+echo "Select mode:"
+echo "1) regular (search by full asset tag, no caching)"
+echo "2) serial  (loads all assets once and searches cached data by last characters)"
+read -p "Enter mode number (1 or 2): " MODE_CHOICE
+[ "$MODE_CHOICE" = "2" ] && MODE="serial"
+
+[ "$MODE" = "serial" ] && download_all_assets
+
+read -p "Choose actions (comma separated): audit, checkin, checkout, assigned
+> " CHOICES
 CHOICES=$(echo "$CHOICES" | tr '[:upper:]' '[:lower:]')
 
 while true; do
-  echo -n "Enter Asset Tag (or 's<search>'): "
+  [ "$MODE" = "serial" ] && echo -n "Enter LAST characters of Asset Tag to search (e.g. 'FYN9'): " || echo -n "Enter FULL Asset Tag: "
   read INPUT
-  get_asset_info "$INPUT"
-  if [ $? -ne 0 ]; then
-    continue
-  fi
+  get_asset_info "$INPUT" || continue
 
   RUN_ORDER=""
   case "$CHOICES" in *assigned*) RUN_ORDER="$RUN_ORDER assigned" ;; esac
